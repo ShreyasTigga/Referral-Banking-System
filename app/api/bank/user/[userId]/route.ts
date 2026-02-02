@@ -1,36 +1,34 @@
-// app/api/bank/user/[userId]/route.ts
-
-import { NextRequest, NextResponse } from "next/server";
-import { ObjectId } from "mongodb";
-import { connectToDatabase } from "@/lib/mongodb";
+import { NextRequest, NextResponse } from "next/server"
+import dbConnect from "@/lib/mongodb"
+import BankAccount from "@/models/bankAccount"
+import mongoose from "mongoose"
 
 export async function GET(
   req: NextRequest,
-  ctx: { params: Promise<{ userId: string }> }
+  { params }: { params: { userId: string } }
 ) {
   try {
-    const { db } = await connectToDatabase();
+    const { userId } = params
 
-    const { userId } = await ctx.params;
-
-    if (!ObjectId.isValid(userId)) {
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
       return NextResponse.json(
         { error: "Invalid userId format" },
         { status: 400 }
-      );
+      )
     }
 
-    const userObjectId = new ObjectId(userId);
+    // --- DB ---
+    await dbConnect()
 
-    const bankAccount = await db
-      .collection("bankaccounts")
-      .findOne({ userId: userObjectId });
+    const bankAccount = await BankAccount.findOne({
+      userId: new mongoose.Types.ObjectId(userId)
+    }).lean()
 
     if (!bankAccount) {
       return NextResponse.json(
         { error: "No bank account found for this user" },
         { status: 404 }
-      );
+      )
     }
 
     return NextResponse.json(
@@ -45,15 +43,15 @@ export async function GET(
         branch: bankAccount.branch,
         pan: bankAccount.pan ?? null,
         upi: bankAccount.upi ?? null,
-        isActive: bankAccount.isActive,
+        isActive: bankAccount.isActive
       },
       { status: 200 }
-    );
+    )
   } catch (err) {
-    console.error("Error fetching bank account:", err);
+    console.error("Error fetching bank account:", err)
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
-    );
+    )
   }
 }

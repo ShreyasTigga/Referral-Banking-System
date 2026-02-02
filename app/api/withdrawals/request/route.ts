@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { connectToDatabase } from "@/lib/mongodb";
+import dbConnect from "@/lib/mongodb";
 import { ObjectId } from "mongodb";
 
 export async function POST(req: NextRequest) {
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Connect to DB
-    const { db } = await connectToDatabase();
+    const { db } = await dbConnect();
     const users = db.collection("users");
     const withdrawals = db.collection("withdrawal_requests");
 

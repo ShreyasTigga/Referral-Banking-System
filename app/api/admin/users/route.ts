@@ -1,48 +1,51 @@
-import { NextRequest, NextResponse } from "next/server";
-import { connectToDatabase } from "@/lib/mongodb";
-import { verifyAdminToken } from "@/lib/adminAuth";
+import { NextRequest, NextResponse } from "next/server"
+import dbConnect from "@/lib/mongodb"
+import { verifyAdminToken } from "@/lib/adminAuth"
+import User from "@/models/user"
 
 export async function GET(req: NextRequest) {
   try {
-    const token = req.cookies.get("admin_session")?.value;
+    // --- Auth ---
+    const token = req.cookies.get("admin_session")?.value
     if (!token) {
       return NextResponse.json(
         { error: "Unauthorized: No admin session" },
         { status: 401 }
-      );
+      )
     }
 
-    const payload = await verifyAdminToken(token);
+    const payload = await verifyAdminToken(token)
     if (!payload) {
       return NextResponse.json(
         { error: "Unauthorized: Invalid or expired token" },
         { status: 401 }
-      );
+      )
     }
 
-    const { db } = await connectToDatabase();
-    const users = db.collection("users");
+    // --- DB ---
+    await dbConnect()
 
-    const docs = await users
-      .find({})
+    // Fetch users (latest first)
+    const users = await User.find({})
       .sort({ createdAt: -1 })
-      .toArray();
+      .select("name email referredBy currentBalance createdAt")
+      .lean()
 
-    const result = docs.map((u: any) => ({
+    const result = users.map((u) => ({
       id: u._id.toString(),
       name: u.name,
       email: u.email,
       referredBy: u.referredBy ? u.referredBy.toString() : null,
       currentBalance: u.currentBalance ?? 0,
-      createdAt: u.createdAt,
-    }));
+      createdAt: u.createdAt
+    }))
 
-    return NextResponse.json(result);
+    return NextResponse.json(result)
   } catch (err: any) {
-    console.error("ERROR in GET /api/admin/users:", err);
+    console.error("ERROR in GET /api/admin/users:", err)
     return NextResponse.json(
       { error: err.message ?? "Internal server error" },
       { status: 500 }
-    );
+    )
   }
 }

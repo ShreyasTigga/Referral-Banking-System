@@ -1,223 +1,202 @@
-import { verifyAdminToken } from "@/lib/adminAuth";
-import { NextRequest, NextResponse } from "next/server";
-import { connectToDatabase } from "@/lib/mongodb";
-import { ObjectId } from "mongodb";
+import { verifyAdminToken } from "@/lib/adminAuth"
+import { NextRequest, NextResponse } from "next/server"
+import dbConnect from "@/lib/mongodb"
+import WithdrawalRequest from "@/models/withdrawalRequest"
+import User from "@/models/user"
+import mongoose from "mongoose"
 
 /**
  * GET /api/admin/withdrawals
- * Returns all pending withdrawal requests with basic user info.
+ * Returns withdrawal requests with user info
  */
 export async function GET(req: NextRequest) {
   try {
-    // ✅ Check admin_session cookie
-    const token = req.cookies.get("admin_session")?.value;
+    // --- Auth ---
+    const token = req.cookies.get("admin_session")?.value
     if (!token) {
       return NextResponse.json(
         { error: "Unauthorized: No admin session" },
         { status: 401 }
-      );
+      )
     }
 
-    const payload = await verifyAdminToken(token);
+    const payload = await verifyAdminToken(token)
     if (!payload) {
       return NextResponse.json(
         { error: "Unauthorized: Invalid or expired token" },
         { status: 401 }
-      );
+      )
     }
 
-    const { db } = await connectToDatabase();
-    const withdrawals = db.collection("withdrawal_requests");
-    const users = db.collection("users");
+    // --- Query ---
+    const { searchParams } = new URL(req.url)
+    const statusParam = searchParams.get("status") || "pending"
 
-    // 🔍 Read status filter from query
-    const { searchParams } = new URL(req.url);
-    const statusParam = searchParams.get("status") || "pending";
-
-    let query: any = {};
+    const query: any = {}
     if (statusParam !== "all") {
-      query.status = statusParam;
+      query.status = statusParam
     }
 
-    const docs = await withdrawals
-      .find(query)
+    // --- DB ---
+    await dbConnect()
+
+    const docs = await WithdrawalRequest.find(query)
       .sort({ dateOfRequest: -1 })
-      .toArray();
+      .populate("userId", "name email")
+      .lean()
 
-    const result = [];
-    for (const w of docs) {
-      const user = await users.findOne(
-        { _id: w.userId },
-        { projection: { name: 1, email: 1 } }
-      );
+    const result = docs.map((w) => ({
+      id: w._id.toString(),
+      userId: (w.userId as any)?._id?.toString(),
+      userName: (w.userId as any)?.name ?? "Unknown",
+      userEmail: (w.userId as any)?.email ?? "Unknown",
+      requestedAmount: w.requestedAmount,
+      withdrawalAmount: w.withdrawalAmount ?? 0,
+      dateOfRequest: w.dateOfRequest,
+      dateOfWithdrawal: w.dateOfWithdrawal,
+      status: w.status
+    }))
 
-      result.push({
-        id: w._id.toString(),
-        userId: w.userId.toString(),
-        userName: user?.name ?? "Unknown",
-        userEmail: user?.email ?? "Unknown",
-        requestedAmount: w.requestedAmount,
-        dateOfRequest: w.dateOfRequest,
-        withdrawalAmount: w.withdrawalAmount,
-        dateOfWithdrawal: w.dateOfWithdrawal,
-        status: w.status,
-      });
-    }
-
-    return NextResponse.json(result);
+    return NextResponse.json(result)
   } catch (err: any) {
-    console.error("ERROR in GET /api/admin/withdrawals:", err);
+    console.error("ERROR in GET /api/admin/withdrawals:", err)
     return NextResponse.json(
       { error: err.message ?? "Internal server error" },
       { status: 500 }
-    );
+    )
   }
 }
 
 /**
  * POST /api/admin/withdrawals
  * Body: { requestId: string, action: "approve" | "reject" }
- *
- * - approve: deducts from user's balance, marks request as approved
- * - reject: marks request as rejected
  */
 export async function POST(req: NextRequest) {
   try {
-    // Check admin_session cookie
-    const token = req.cookies.get("admin_session")?.value;
+    // --- Auth ---
+    const token = req.cookies.get("admin_session")?.value
     if (!token) {
       return NextResponse.json(
         { error: "Unauthorized: No admin session" },
         { status: 401 }
-      );
+      )
     }
 
-    const payload = await verifyAdminToken(token);
+    const payload = await verifyAdminToken(token)
     if (!payload) {
       return NextResponse.json(
         { error: "Unauthorized: Invalid or expired token" },
         { status: 401 }
-      );
+      )
     }
 
-    const { requestId, action } = await req.json();
+    const { requestId, action } = await req.json()
 
     if (!requestId || !action) {
       return NextResponse.json(
         { error: "requestId and action are required" },
         { status: 400 }
-      );
+      )
     }
 
-    if (typeof requestId !== "string" || requestId.length !== 24) {
+    if (!mongoose.Types.ObjectId.isValid(requestId)) {
       return NextResponse.json(
         { error: "Invalid requestId format", requestId },
         { status: 400 }
-      );
+      )
     }
 
     if (action !== "approve" && action !== "reject") {
       return NextResponse.json(
         { error: 'Action must be "approve" or "reject"' },
         { status: 400 }
-      );
+      )
     }
 
-    const { db } = await connectToDatabase();
-    const withdrawals = db.collection("withdrawal_requests");
-    const users = db.collection("users");
+    // --- DB ---
+    await dbConnect()
 
-    const requestObjectId = new ObjectId(requestId);
-
-    const requestDoc = await withdrawals.findOne({ _id: requestObjectId });
+    const requestDoc = await WithdrawalRequest.findById(requestId)
 
     if (!requestDoc) {
       return NextResponse.json(
         { error: "Withdrawal request not found" },
         { status: 404 }
-      );
+      )
     }
 
     if (requestDoc.status !== "pending") {
       return NextResponse.json(
         { error: `Request is already ${requestDoc.status}` },
         { status: 400 }
-      );
+      )
     }
 
-    const userId = requestDoc.userId;
-    const requestedAmount = requestDoc.requestedAmount;
+    const user = await User.findById(requestDoc.userId)
 
-    const user = await users.findOne({ _id: userId });
     if (!user) {
       return NextResponse.json(
         { error: "User not found for this withdrawal request" },
         { status: 404 }
-      );
+      )
     }
 
-    const currentBalance = user.currentBalance ?? 0;
+    const currentBalance = user.currentBalance ?? 0
+    const requestedAmount = requestDoc.requestedAmount
 
     if (action === "approve") {
       if (currentBalance < requestedAmount) {
         return NextResponse.json(
           {
-            error:
-              "User does not have sufficient balance to approve this withdrawal",
+            error: "Insufficient balance",
             currentBalance,
-            requestedAmount,
+            requestedAmount
           },
           { status: 400 }
-        );
+        )
       }
 
-      const now = new Date();
+      const now = new Date()
 
-      await users.updateOne(
-        { _id: userId },
-        { $inc: { currentBalance: -requestedAmount } }
-      );
+      // Atomic updates
+      await User.findByIdAndUpdate(user._id, {
+        $inc: { currentBalance: -requestedAmount }
+      })
 
-      await withdrawals.updateOne(
-        { _id: requestObjectId },
-        {
-          $set: {
-            status: "approved",
-            withdrawalAmount: requestedAmount,
-            dateOfWithdrawal: now,
-          },
+      await WithdrawalRequest.findByIdAndUpdate(requestDoc._id, {
+        $set: {
+          status: "approved",
+          withdrawalAmount: requestedAmount,
+          dateOfWithdrawal: now
         }
-      );
+      })
 
       return NextResponse.json({
         message: "Withdrawal request approved",
         requestId,
-        newBalance: currentBalance - requestedAmount,
-      });
+        newBalance: currentBalance - requestedAmount
+      })
     } else {
-      const now = new Date();
+      const now = new Date()
 
-      await withdrawals.updateOne(
-        { _id: requestObjectId },
-        {
-          $set: {
-            status: "rejected",
-            withdrawalAmount: 0,
-            dateOfWithdrawal: now,
-          },
+      await WithdrawalRequest.findByIdAndUpdate(requestDoc._id, {
+        $set: {
+          status: "rejected",
+          withdrawalAmount: 0,
+          dateOfWithdrawal: now
         }
-      );
+      })
 
       return NextResponse.json({
         message: "Withdrawal request rejected",
-        requestId,
-      });
+        requestId
+      })
     }
   } catch (err: any) {
-    console.error("ERROR in POST /api/admin/withdrawals:", err);
+    console.error("ERROR in POST /api/admin/withdrawals:", err)
     return NextResponse.json(
       { error: err.message ?? "Internal server error" },
       { status: 500 }
-    );
+    )
   }
 }

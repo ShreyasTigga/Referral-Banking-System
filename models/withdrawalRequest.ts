@@ -1,13 +1,50 @@
-import { ObjectId } from "mongodb";
+import mongoose, { Schema, Document, Model } from "mongoose"
 
-export type WithdrawalStatus = "pending" | "approved" | "rejected";
-
-export interface WithdrawalRequest {
-  _id?: ObjectId;
-  userId: ObjectId;          // reference to users._id
-  requestedAmount: number;
-  dateOfRequest: Date;
-  withdrawalAmount: number | null;   // final approved amount (set when admin processes)
-  dateOfWithdrawal: Date | null;
-  status: WithdrawalStatus;          // "pending" | "approved" | "rejected"
+export interface IWithdrawalRequest extends Document {
+  userId: mongoose.Types.ObjectId
+  requestedAmount: number
+  withdrawalAmount?: number
+  status: "pending" | "approved" | "rejected"
+  dateOfRequest: Date
+  dateOfWithdrawal?: Date
 }
+
+const WithdrawalRequestSchema = new Schema<IWithdrawalRequest>(
+  {
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true
+    },
+    requestedAmount: {
+      type: Number,
+      required: true
+    },
+    withdrawalAmount: {
+      type: Number,
+      default: 0
+    },
+    status: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending"
+    },
+    dateOfRequest: {
+      type: Date,
+      default: Date.now
+    },
+    dateOfWithdrawal: {
+      type: Date
+    }
+  },
+  { timestamps: true }
+)
+
+const WithdrawalRequest: Model<IWithdrawalRequest> =
+  mongoose.models.WithdrawalRequest ||
+  mongoose.model<IWithdrawalRequest>(
+    "WithdrawalRequest",
+    WithdrawalRequestSchema
+  )
+
+export default WithdrawalRequest

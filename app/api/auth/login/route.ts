@@ -1,39 +1,46 @@
-import { NextRequest, NextResponse } from "next/server";
-import { connectToDatabase } from "@/lib/mongodb";
-import bcrypt from "bcryptjs";
+import { NextRequest, NextResponse } from "next/server"
+import dbConnect from "@/lib/mongodb"
+import bcrypt from "bcryptjs"
+import User from "@/models/user"
+
+interface LoginBody {
+  email: string
+  password: string
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const { email, password } = await req.json();
+    const body: LoginBody = await req.json()
+    const { email, password } = body
 
     if (!email || !password) {
       return NextResponse.json(
         { error: "Email and password are required" },
         { status: 400 }
-      );
+      )
     }
 
-    const { db } = await connectToDatabase();
-    const users = db.collection("users");
+    // --- DB ---
+    await dbConnect()
 
-    const user = await users.findOne({ email });
-
+    const user = await User.findOne({ email })
     if (!user) {
       return NextResponse.json(
         { error: "Invalid email or password" },
         { status: 401 }
-      );
+      )
     }
 
-    const isMatch = await bcrypt.compare(password, user.passwordHash);
+    // --- Auth ---
+    const isMatch = await bcrypt.compare(password, user.passwordHash)
     if (!isMatch) {
       return NextResponse.json(
         { error: "Invalid email or password" },
         { status: 401 }
-      );
+      )
     }
 
-    // For now, just return user info (no token yet)
+    // --- Response ---
     return NextResponse.json({
       message: "Login successful",
       user: {
@@ -41,14 +48,16 @@ export async function POST(req: NextRequest) {
         name: user.name,
         email: user.email,
         currentBalance: user.currentBalance ?? 0,
-        referredBy: user.referredBy ? user.referredBy.toString() : null,
-      },
-    });
+        referredBy: user.referredBy
+          ? user.referredBy.toString()
+          : null
+      }
+    })
   } catch (err: any) {
-    console.error("ERROR in POST /api/auth/login:", err);
+    console.error("ERROR in POST /api/auth/login:", err)
     return NextResponse.json(
       { error: err.message ?? "Internal server error" },
       { status: 500 }
-    );
+    )
   }
 }

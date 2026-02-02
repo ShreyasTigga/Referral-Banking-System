@@ -1,73 +1,77 @@
-import { NextRequest, NextResponse } from "next/server";
-import { connectToDatabase } from "@/lib/mongodb";
-import bcrypt from "bcryptjs";
-import { ObjectId } from "mongodb";
+import { NextRequest, NextResponse } from "next/server"
+import dbConnect from "@/lib/mongodb"
+import bcrypt from "bcryptjs"
+import User from "@/models/user"
+import mongoose from "mongoose"
+
+interface ChangePasswordBody {
+  userId: string
+  oldPassword: string
+  newPassword: string
+  confirmPassword: string
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId, oldPassword, newPassword, confirmPassword } =
-      await req.json();
+    const body: ChangePasswordBody = await req.json()
+    const { userId, oldPassword, newPassword, confirmPassword } = body
 
-    // Basic validation
+    // --- Validation ---
     if (!userId || !oldPassword || !newPassword || !confirmPassword) {
       return NextResponse.json(
         { error: "All fields are required" },
         { status: 400 }
-      );
+      )
     }
 
     if (newPassword !== confirmPassword) {
       return NextResponse.json(
         { error: "New password and confirm password do not match" },
         { status: 400 }
-      );
+      )
     }
 
-    if (typeof userId !== "string" || userId.length !== 24) {
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
       return NextResponse.json(
         { error: "Invalid userId format" },
         { status: 400 }
-      );
+      )
     }
 
-    const { db } = await connectToDatabase();
-    const users = db.collection("users");
+    // --- DB ---
+    await dbConnect()
 
-    const userObjectId = new ObjectId(userId);
-
-    const user = await users.findOne({ _id: userObjectId });
+    const user = await User.findById(userId)
     if (!user) {
       return NextResponse.json(
         { error: "User not found" },
         { status: 404 }
-      );
+      )
     }
 
-    // Compare old password with stored hash
-    const isValid = await bcrypt.compare(oldPassword, user.passwordHash);
+    // --- Auth ---
+    const isValid = await bcrypt.compare(oldPassword, user.passwordHash)
     if (!isValid) {
       return NextResponse.json(
         { error: "Current password is incorrect" },
         { status: 401 }
-      );
+      )
     }
 
-    // Hash new password
-    const newHash = await bcrypt.hash(newPassword, 10);
+    // --- Update ---
+    const newHash = await bcrypt.hash(newPassword, 10)
 
-    await users.updateOne(
-      { _id: userObjectId },
-      { $set: { passwordHash: newHash } }
-    );
+    user.passwordHash = newHash
+    await user.save()
 
     return NextResponse.json({
-      message: "Password changed successfully",
-    });
+      message: "Password changed successfully"
+    })
   } catch (err: any) {
-    console.error("Change Password Error:", err);
+    console.error("Change Password Error:", err)
     return NextResponse.json(
       { error: err.message ?? "Internal Server Error" },
       { status: 500 }
-    );
+    )
   }
 }

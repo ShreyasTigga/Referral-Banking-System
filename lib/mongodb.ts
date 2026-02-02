@@ -1,28 +1,28 @@
-import { MongoClient, Db } from "mongodb";
+import mongoose from "mongoose"
 
-const uri = process.env.MONGODB_URI as string;
-const dbName = process.env.MONGODB_DB as string;
+const MONGODB_URI = process.env.MONGODB_URI
 
-if (!uri) {
-  throw new Error("Please add MONGODB_URI to your .env.local file");
-}
-if (!dbName) {
-  throw new Error("Please add MONGODB_DB to your .env.local file");
+if (!MONGODB_URI) {
+  throw new Error("Please define the MONGODB_URI environment variable")
 }
 
-let cachedClient: MongoClient | null = null;
-let cachedDb: Db | null = null;
+// Global cache for hot reload / serverless
+let cached = (global as any).mongoose
 
-export async function connectToDatabase(): Promise<{ client: MongoClient; db: Db }> {
-  if (cachedClient && cachedDb) {
-    return { client: cachedClient, db: cachedDb };
+if (!cached) {
+  cached = (global as any).mongoose = {
+    conn: null,
+    promise: null
+  }
+}
+
+export default async function dbConnect() {
+  if (cached.conn) return cached.conn
+
+  if (!cached.promise) {
+    cached.promise = mongoose.connect(MONGODB_URI!).then((mongoose) => mongoose)
   }
 
-  const client = await MongoClient.connect(uri);
-  const db = client.db(dbName);
-
-  cachedClient = client;
-  cachedDb = db;
-
-  return { client, db };
+  cached.conn = await cached.promise
+  return cached.conn
 }

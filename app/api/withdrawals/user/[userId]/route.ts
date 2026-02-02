@@ -1,44 +1,50 @@
-import { NextRequest, NextResponse } from "next/server";
-import { connectToDatabase } from "@/lib/mongodb";
-import { ObjectId } from "mongodb";
+import { NextRequest, NextResponse } from "next/server"
+import dbConnect from "@/lib/mongodb"
+import WithdrawalRequest from "@/models/withdrawalRequest"
+import mongoose from "mongoose"
 
-export async function GET(req: NextRequest, ctx: any) {
-  const params = await ctx.params;
-  const userId = params.userId as string | undefined;
-
-  if (!userId || userId.length !== 24) {
-    return NextResponse.json(
-      { error: "Invalid userId", userId },
-      { status: 400 }
-    );
-  }
-
+export async function GET(
+  req: NextRequest,
+  ctx: { params: Promise<{ userId: string }> }
+) {
   try {
-    const { db } = await connectToDatabase();
-    const withdrawals = db.collection("withdrawal_requests");
+    // ✅ Next.js 16: params is async
+    const { userId } = await ctx.params
 
-    const userObjectId = new ObjectId(userId);
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return NextResponse.json(
+        { error: "Invalid userId", userId },
+        { status: 400 }
+      )
+    }
 
-    const docs = await withdrawals
-      .find({ userId: userObjectId })
+    // --- DB ---
+    await dbConnect()
+
+    const docs = await WithdrawalRequest.find({
+      userId: new mongoose.Types.ObjectId(userId)
+    })
       .sort({ dateOfRequest: -1 })
-      .toArray();
+      .lean()
 
-    const result = docs.map((w: any) => ({
+    const result = docs.map((w) => ({
       id: w._id.toString(),
       requestedAmount: w.requestedAmount,
       dateOfRequest: w.dateOfRequest,
-      withdrawalAmount: w.withdrawalAmount,
-      dateOfWithdrawal: w.dateOfWithdrawal,
-      status: w.status,
-    }));
+      withdrawalAmount: w.withdrawalAmount ?? 0,
+      dateOfWithdrawal: w.dateOfWithdrawal ?? null,
+      status: w.status
+    }))
 
-    return NextResponse.json(result);
+    return NextResponse.json(result)
   } catch (err: any) {
-    console.error("ERROR in GET /api/withdrawals/user/[userId]:", err);
+    console.error(
+      "ERROR in GET /api/withdrawals/user/[userId]:",
+      err
+    )
     return NextResponse.json(
       { error: err.message ?? "Internal server error" },
       { status: 500 }
-    );
+    )
   }
 }
